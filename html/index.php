@@ -9,46 +9,57 @@ $db = new PDO('mysql:host=localhost;port=3306;dbname=bunker', 'root', 'bunker', 
 define('REPORT_START', '2014-08-22'); //for some reason let's consider the report is taken from this date onwards
 
 $app->get('/', function () use ($twig) {
-	echo $twig->render('index.twig');
+    echo $twig->render('index.twig');
 });
 
-$app->get('/chart', function () use ($twig, $db) {
+$app->get('/chart', function () use ($twig, $db, $app) {
+    $expira = strtotime(date('Y-m-d 23:59:59'));
+    $app->etag($expira);
+    $app->expires($expira);
+   
     $stmt = $db->prepare("SELECT tracking_type, tracking_term FROM twitter_tracking");
     $stmt->execute();
-    $data = array('hashtag' => array(), 'mentions' => array());
+    $data = array('hashtags' => array(), 'mentions' => array(), 'user' => array());
     foreach ($stmt->fetchAll() as $track) {
         if ($track['tracking_type'] == 'hashtag')
         {
-            $stmt = $db->prepare("SELECT twitter_created_at d, count(1) q FROM twitter_tweets JOIN twitter_tweet_entities on twitter_tweets.tweet_id = twitter_tweet_entities.tweet_id and type = 'hashtag' and tag = ? WHERE twitter_created_at > ? group by twitter_created_at");
+            $stmt = $db->prepare("SELECT DATE(twitter_created_at) d, count(1) q FROM twitter_tweets JOIN twitter_tweet_entities on twitter_tweets.tweet_id = twitter_tweet_entities.tweet_id and type = 'hashtag' and tag = ? WHERE twitter_created_at > ? group by d");
             $stmt->execute(array($track['tracking_term'], REPORT_START));
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $row['d'] = date('Y-m-d', strtotime($row['d']));
-                if (!isset($data['hashtags'][$row['d']])) $data['hashtags'][$row['d']] = 0;
+               if (!isset($data['hashtags'][$row['d']])) $data['hashtags'][$row['d']] = 0;
                 $data['hashtags'][$row['d']] += $row['q'];
             }
+           
         }
         elseif ($track['tracking_type'] == 'mention')
         {
-            $stmt = $db->prepare("SELECT twitter_created_at d, count(1) q FROM twitter_tweets JOIN twitter_tweet_entities on twitter_tweets.tweet_id = twitter_tweet_entities.tweet_id and tag = ? and type = 'mentions' WHERE twitter_created_at > ? group by twitter_created_at");
+            $stmt = $db->prepare("SELECT DATE(twitter_created_at) d, count(1) q FROM twitter_tweets JOIN twitter_tweet_entities on twitter_tweets.tweet_id = twitter_tweet_entities.tweet_id and tag = ? and type = 'mentions' WHERE twitter_created_at > ? group by d");
             $stmt->execute(array($track['tracking_term'], REPORT_START));
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $row['d'] = date('Y-m-d', strtotime($row['d']));
                 if (!isset($data['mentions'][$row['d']])) $data['mentions'][$row['d']] = 0;
                 $data['mentions'][$row['d']] += $row['q'];
             }
         } elseif ($track['tracking_type'] == 'user') {
-            $stmt = $db->prepare("SELECT twitter_created_at d, count(1) q FROM twitter_tweets JOIN twitter_actors on twitter_actors.twitter_user_id = twitter_tweets.twitter_user_id and username = ? WHERE twitter_created_at > ? group by twitter_created_at");
+            $stmt = $db->prepare("SELECT DATE(twitter_created_at) d, count(1) q FROM twitter_tweets JOIN twitter_actors on twitter_actors.twitter_user_id = twitter_tweets.twitter_user_id and username = ? WHERE twitter_created_at > ? group by d");
             $stmt->execute(array($track['tracking_term'], REPORT_START));
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $row['d'] = date('Y-m-d', strtotime($row['d']));
                 if (!isset($data['user'][$row['d']])) $data['user'][$row['d']] = 0;
                 $data['user'][$row['d']] += $row['q'];
             }
         }
     }
+    
     $data = fillDates($data, REPORT_START);
+    
+    $chart_obj = new stdClass();
+    $chart_obj->dates = array_values($data['dates']);
+    $chart_obj->mentions = array_values($data['mentions']);
+    $chart_obj->hashtags = array_values($data['hashtags']);
+    $chart_obj->user = array_values($data['user']);
 
-    echo $twig->render('chart.twig', array('data' => $data));
+    $app->response->headers->set('Content-Type', 'application/json');
+    echo json_encode($chart_obj);
+
 });
 
 $app->run();
@@ -60,12 +71,13 @@ function fillDates($dates, $min)
     ksort($dates['hashtags']);
     ksort($dates['user']);
 
+  
     $max = array_keys($dates['mentions'])[count($dates['mentions']) - 1];
     if ($max < array_keys($dates['hashtags'])[count($dates['hashtags']) - 1]) {
         $max = array_keys($dates['hashtags'])[count($dates['hashtags']) - 1];
     }
-    if ($max < array_keys($dates['user'])[count($dates['hashtags']) - 1]) {
-        $max = array_keys($dates['user'])[count($dates['hashtags']) - 1];
+    if ($max < array_keys($dates['user'])[count($dates['user']) - 1]) {
+        $max = array_keys($dates['user'])[count($dates['user']) - 1];
     }
 
     while ($min <= $max) {

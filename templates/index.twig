@@ -36,7 +36,25 @@
     <script type="application/javascript">
         $(document).ready(function () {
             $.get("/chart", function (data) {
-                $("#chart_placeholder").html(data);
+                 $("#chart_placeholder").html('<div id="chart" style="width:100%; height:400px;"></div>');
+                 $('#chart').highcharts({
+                    title: {
+                        text: 'Twitter stats'
+                    },
+                    xAxis: {
+                        categories: data.dates
+                    },
+                    series: [{
+                        name: 'Mentions',
+                        data: data.mentions
+                    }, {
+                        name: 'Hashtags',
+                        data: data.hashtags
+                    }, {
+                        name: 'User',
+                        data: data.user
+                    }]
+                });
             });
         });
     </script>
